@@ -46,8 +46,7 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val allGranted = results.values.all { it }
-        viewModel.onPermissionsResult(allGranted)
+        viewModel.onPermissionsResult(results)
     }
 
     // Document file picker launcher

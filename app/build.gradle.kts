@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val defaultVersionCode = 1
-val defaultVersionName = "1.0.0"
+val defaultVersionCode = 2
+val defaultVersionName = "1.0.1"
 
 android {
     namespace = "com.samielmadani.orbit"
@@ -36,11 +36,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = if (System.getenv("RELEASE_STORE_FILE") != null) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

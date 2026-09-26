@@ -26,3 +26,11 @@ Open the project in Android Studio or run:
 ```powershell
 .\gradlew.bat :app:assembleDebug
 ```
+
+For an updateable release APK, configure `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and `RELEASE_KEY_PASSWORD`, then run:
+
+```powershell
+.\gradlew.bat :app:assembleRelease
+```
+
+Keep using the same release keystore for every update. Android will reject an update signed with a different key; if the original release key is unavailable, users must uninstall the previous app before installing a newly signed build.

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,6 +27,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class OrbitViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "OrbitPermissions"
+    }
 
     private val context: Context get() = getApplication<Application>().applicationContext
     val nearbyManager = NearbyManager(context)
@@ -109,10 +114,15 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun hasRequiredPermissions(): Boolean {
-        val permissions = getRequiredPermissionsList()
-        return permissions.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        val missingPermissions = getRequiredPermissionsList().filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
+        if (missingPermissions.isEmpty()) {
+            Log.i(TAG, "[$localDeviceName] All required runtime permissions are granted")
+        } else {
+            Log.w(TAG, "[$localDeviceName] Missing runtime permissions: ${missingPermissions.joinToString()}")
+        }
+        return missingPermissions.isEmpty()
     }
 
     fun getRequiredPermissionsList(): List<String> {
@@ -126,7 +136,6 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             list.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            list.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         return list
     }
@@ -139,10 +148,14 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onPermissionsResult(allGranted: Boolean) {
+    fun onPermissionsResult(permissionResults: Map<String, Boolean>) {
         _showPermissionSheet.value = false
-        if (allGranted) {
+        Log.i(TAG, "[$localDeviceName] Permission request result: ${permissionResults.entries.joinToString { "${it.key}=${it.value}" }}")
+        if (hasRequiredPermissions()) {
+            Log.i(TAG, "[$localDeviceName] Permission gate passed; starting Nearby discovery and advertising")
             nearbyManager.startNearby()
+        } else {
+            Log.w(TAG, "[$localDeviceName] Permission gate failed; Nearby discovery and advertising not started")
         }
     }
 

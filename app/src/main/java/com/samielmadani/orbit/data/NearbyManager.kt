@@ -56,6 +56,13 @@ sealed class NearbyEvent {
 
 class NearbyManager(private val context: Context) {
 
+    private data class IncomingFilePayload(
+        val targetFile: File,
+        val item: ManifestItem,
+        val sourceUri: Uri?,
+        var completed: Boolean = false
+    )
+
     companion object {
         private const val TAG = "OrbitNearby"
         const val SERVICE_ID = "com.samielmadani.orbit"
@@ -112,7 +119,7 @@ class NearbyManager(private val context: Context) {
     private var reconnectJob: Job? = null
 
     // Active payload tracking: payloadId -> (file, item)
-    private val incomingFilePayloads = mutableMapOf<Long, Pair<File, ManifestItem>>()
+    private val incomingFilePayloads = mutableMapOf<Long, IncomingFilePayload>()
     private val outgoingPayloads = mutableMapOf<Long, TransferItem>()
     private val outgoingItemsAwaitingApproval = mutableMapOf<String, List<TransferItem>>()
 
@@ -121,6 +128,7 @@ class NearbyManager(private val context: Context) {
     // -------------------------------------------------------------
 
     fun startNearby() {
+        Log.i(TAG, "[$localDeviceName] Starting Nearby: serviceId=$SERVICE_ID strategy=P2P_STAR")
         startAdvertising()
         startDiscovery()
     }
@@ -132,7 +140,11 @@ class NearbyManager(private val context: Context) {
     }
 
     fun startAdvertising() {
-        if (_isAdvertising.value) return
+        if (_isAdvertising.value) {
+            Log.d(TAG, "[$localDeviceName] Advertising already active")
+            return
+        }
+        Log.i(TAG, "[$localDeviceName] startAdvertising requested: serviceId=$SERVICE_ID strategy=P2P_STAR")
         val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
         connectionsClient.startAdvertising(
             localDeviceName,
@@ -140,10 +152,10 @@ class NearbyManager(private val context: Context) {
             connectionLifecycleCallback,
             options
         ).addOnSuccessListener {
-            Log.d(TAG, "Advertising started as $localDeviceName")
+            Log.i(TAG, "[$localDeviceName] Advertising started: serviceId=$SERVICE_ID")
             _isAdvertising.value = true
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Advertising failed", e)
+            Log.e(TAG, "[$localDeviceName] Advertising failed: ${e.message}", e)
             _isAdvertising.value = false
         }
     }
@@ -154,17 +166,21 @@ class NearbyManager(private val context: Context) {
     }
 
     fun startDiscovery() {
-        if (_isScanning.value) return
+        if (_isScanning.value) {
+            Log.d(TAG, "[$localDeviceName] Discovery already active")
+            return
+        }
+        Log.i(TAG, "[$localDeviceName] startDiscovery requested: serviceId=$SERVICE_ID strategy=P2P_STAR")
         val options = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
         connectionsClient.startDiscovery(
             SERVICE_ID,
             endpointDiscoveryCallback,
             options
         ).addOnSuccessListener {
-            Log.d(TAG, "Discovery started")
+            Log.i(TAG, "[$localDeviceName] Discovery started: serviceId=$SERVICE_ID")
             _isScanning.value = true
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Discovery failed", e)
+            Log.e(TAG, "[$localDeviceName] Discovery failed: ${e.message}", e)
             _isScanning.value = false
         }
     }
@@ -179,6 +195,7 @@ class NearbyManager(private val context: Context) {
     // -------------------------------------------------------------
 
     fun initiateConnection(device: DiscoveredDevice) {
+        Log.i(TAG, "[$localDeviceName] requestConnection: endpoint=${device.endpointId} name=${device.deviceName}")
         val currentDevices = _discoveredDevices.value.map {
             if (it.endpointId == device.endpointId) it.copy(isConnecting = true) else it
         }
@@ -189,20 +206,21 @@ class NearbyManager(private val context: Context) {
             device.endpointId,
             connectionLifecycleCallback
         ).addOnSuccessListener {
-            Log.d(TAG, "Connection requested to ${device.deviceName}")
+            Log.i(TAG, "[$localDeviceName] Connection request accepted by Nearby for ${device.deviceName} (${device.endpointId})")
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Failed requesting connection to ${device.deviceName}", e)
+            Log.e(TAG, "[$localDeviceName] Connection request failed for ${device.deviceName} (${device.endpointId}): ${e.message}", e)
             resetConnectingState(device.endpointId)
         }
     }
 
     fun acceptConnection(endpointId: String) {
+        Log.i(TAG, "[$localDeviceName] acceptConnection requested: endpoint=$endpointId")
         connectionsClient.acceptConnection(endpointId, payloadCallback)
             .addOnSuccessListener {
-                Log.d(TAG, "Accepted connection to $endpointId")
+                Log.i(TAG, "[$localDeviceName] acceptConnection succeeded: endpoint=$endpointId")
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Failed accepting connection to $endpointId", e)
+                Log.e(TAG, "[$localDeviceName] acceptConnection failed: endpoint=$endpointId error=${e.message}", e)
             }
     }
 
@@ -373,7 +391,7 @@ class NearbyManager(private val context: Context) {
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            Log.d(TAG, "Endpoint found: $endpointId (${info.endpointName})")
+            Log.i(TAG, "[$localDeviceName] onEndpointFound: endpoint=$endpointId name=${info.endpointName} serviceId=$SERVICE_ID")
             val recents = recentDevicesStore.getRecentDevices()
             val isRecent = recents.any { it.name.equals(info.endpointName, ignoreCase = true) }
 
@@ -391,7 +409,7 @@ class NearbyManager(private val context: Context) {
         }
 
         override fun onEndpointLost(endpointId: String) {
-            Log.d(TAG, "Endpoint lost: $endpointId")
+            Log.i(TAG, "[$localDeviceName] onEndpointLost: endpoint=$endpointId")
             _discoveredDevices.value = _discoveredDevices.value.filter { it.endpointId != endpointId }
         }
     }
@@ -402,7 +420,7 @@ class NearbyManager(private val context: Context) {
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            Log.d(TAG, "Connection initiated: $endpointId (${info.endpointName})")
+            Log.i(TAG, "[$localDeviceName] onConnectionInitiated: endpoint=$endpointId name=${info.endpointName} incoming=${info.isIncomingConnection}; accepting")
             connectedEndpointId = endpointId
             connectedDeviceName = info.endpointName
 
@@ -412,7 +430,7 @@ class NearbyManager(private val context: Context) {
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
             when (resolution.status.statusCode) {
                 ConnectionsStatusCodes.STATUS_OK -> {
-                    Log.d(TAG, "Connection established successfully to $endpointId")
+                    Log.i(TAG, "[$localDeviceName] onConnectionResult: endpoint=$endpointId status=OK")
                     reconnectJob?.cancel()
                     resetConnectingState(endpointId)
                     scope.launch {
@@ -420,19 +438,19 @@ class NearbyManager(private val context: Context) {
                     }
                 }
                 ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED -> {
-                    Log.w(TAG, "Connection rejected by $endpointId")
+                    Log.w(TAG, "[$localDeviceName] onConnectionResult: endpoint=$endpointId status=REJECTED message=${resolution.status.statusMessage}")
                     resetConnectingState(endpointId)
                     scope.launch { _events.emit(NearbyEvent.ConnectionRejected(endpointId)) }
                 }
                 else -> {
-                    Log.w(TAG, "Connection failed: ${resolution.status.statusMessage}")
+                    Log.e(TAG, "[$localDeviceName] onConnectionResult: endpoint=$endpointId status=${resolution.status.statusCode} message=${resolution.status.statusMessage}")
                     resetConnectingState(endpointId)
                 }
             }
         }
 
         override fun onDisconnected(endpointId: String) {
-            Log.d(TAG, "Disconnected from $endpointId")
+            Log.w(TAG, "[$localDeviceName] onDisconnected: endpoint=$endpointId")
             val batch = _activeBatch.value
             if (batch != null && batch.status == TransferStatus.TRANSFERRING) {
                 // Connection dropped mid-transfer: enter RECONNECTING buffer window
@@ -470,6 +488,7 @@ class NearbyManager(private val context: Context) {
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            Log.i(TAG, "[$localDeviceName] onPayloadReceived: endpoint=$endpointId payloadId=${payload.id} type=${payload.type}")
             when (payload.type) {
                 Payload.Type.BYTES -> {
                     val bytes = payload.asBytes() ?: return
@@ -531,14 +550,19 @@ class NearbyManager(private val context: Context) {
                     val payloadFile = payload.asFile() ?: return
                     val manifest = pendingManifest
                     val nextItem = manifest?.items?.firstOrNull { item ->
-                        incomingFilePayloads.none { it.value.second.name == item.name }
+                        incomingFilePayloads.values.none { it.item.name == item.name }
                     }
 
                     val downloadDir = StorageGuard.getOrbitDownloadDirectory()
                     val targetFile = File(downloadDir, nextItem?.name ?: "orbit_${System.currentTimeMillis()}.bin")
 
                     if (nextItem != null) {
-                        incomingFilePayloads[payload.id] = Pair(targetFile, nextItem)
+                        incomingFilePayloads[payload.id] = IncomingFilePayload(
+                            targetFile = targetFile,
+                            item = nextItem,
+                            sourceUri = payloadFile.asUri()
+                        )
+                        Log.i(TAG, "[$localDeviceName] Receiving file payload ${nextItem.name} (${payload.id}) to ${targetFile.absolutePath}")
                     }
                 }
                 Payload.Type.STREAM -> {
@@ -548,6 +572,7 @@ class NearbyManager(private val context: Context) {
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            Log.d(TAG, "[$localDeviceName] onPayloadTransferUpdate: endpoint=$endpointId payloadId=${update.payloadId} status=${update.status} bytes=${update.bytesTransferred}/${update.totalBytes}")
             val batch = _activeBatch.value ?: return
 
             when (update.status) {
@@ -576,27 +601,48 @@ class NearbyManager(private val context: Context) {
                     )
                 }
                 PayloadTransferUpdate.Status.SUCCESS -> {
-                    // File transfer succeeded
                     val incomingInfo = incomingFilePayloads[update.payloadId]
                     if (incomingInfo != null) {
-                        val (targetFile, item) = incomingInfo
-                        // Move or finalize payload file
+                        try {
+                            val sourceUri = requireNotNull(incomingInfo.sourceUri) { "Received payload URI is unavailable" }
+                            context.contentResolver.openInputStream(sourceUri).use { input ->
+                                requireNotNull(input) { "Could not open received payload" }
+                                FileOutputStream(incomingInfo.targetFile).use { output -> input.copyTo(output) }
+                            }
+                            incomingInfo.completed = true
+                            Log.i(TAG, "[$localDeviceName] Received file saved: ${incomingInfo.item.name} bytes=${incomingInfo.targetFile.length()}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[$localDeviceName] Failed saving received file ${incomingInfo.item.name}: ${e.message}", e)
+                            _activeBatch.value = batch.copy(
+                                status = TransferStatus.FAILED,
+                                errorMessage = "Could not save ${incomingInfo.item.name}: ${e.message}"
+                            )
+                            return
+                        }
                     }
 
-                    // Check if entire batch is complete
-                    val total = batch.totalBytes
-                    val updatedBatch = batch.copy(
-                        bytesTransferred = total,
-                        status = TransferStatus.COMPLETED,
-                        speedBytesPerSec = 0L,
-                        etaSeconds = 0L
-                    )
-                    _activeBatch.value = updatedBatch
-                    scope.launch {
-                        _events.emit(NearbyEvent.TransferFinished(updatedBatch))
+                    val outgoingItem = outgoingPayloads.remove(update.payloadId)
+                    val expectedIncomingFiles = pendingManifest?.items?.count { !it.isText } ?: 0
+                    val receivedFilesComplete = expectedIncomingFiles > 0 &&
+                        incomingFilePayloads.size == expectedIncomingFiles &&
+                        incomingFilePayloads.values.all { it.completed }
+                    val outgoingFilesComplete = outgoingItem != null && outgoingPayloads.isEmpty()
+                    val textOnlyOutgoingComplete = outgoingItem == null && incomingFilePayloads.isEmpty() &&
+                        batch.isOutgoing && batch.items.all { it.isText }
+                    if (receivedFilesComplete || outgoingFilesComplete || textOnlyOutgoingComplete) {
+                        val updatedBatch = batch.copy(
+                            bytesTransferred = batch.totalBytes,
+                            status = TransferStatus.COMPLETED,
+                            speedBytesPerSec = 0L,
+                            etaSeconds = 0L
+                        )
+                        _activeBatch.value = updatedBatch
+                        Log.i(TAG, "[$localDeviceName] Transfer batch completed: batchId=${updatedBatch.batchId}")
+                        scope.launch { _events.emit(NearbyEvent.TransferFinished(updatedBatch)) }
                     }
                 }
                 PayloadTransferUpdate.Status.FAILURE -> {
+                    Log.e(TAG, "[$localDeviceName] Payload transfer failed: payloadId=${update.payloadId}")
                     _activeBatch.value = batch.copy(
                         status = TransferStatus.FAILED,
                         errorMessage = "Transfer failed during stream transmission."
