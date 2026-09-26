@@ -1,4 +1,4 @@
-wpackage com.samielmadani.orbit.data
+package com.samielmadani.orbit.data
 
 import android.content.Context
 import android.content.SharedPreferences
