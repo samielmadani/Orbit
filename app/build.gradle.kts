@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val defaultVersionCode = 1
+val defaultVersionName = "1.0.0"
+
 android {
     namespace = "com.samielmadani.orbit"
     compileSdk = 35
@@ -12,8 +15,8 @@ android {
         applicationId = "com.samielmadani.orbit"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty("versionCode").map(String::toInt).getOrElse(1)
-        versionName = providers.gradleProperty("versionName").getOrElse("1.0.0")
+        versionCode = providers.gradleProperty("versionCode").map(String::toInt).getOrElse(defaultVersionCode)
+        versionName = providers.gradleProperty("versionName").getOrElse(defaultVersionName)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
