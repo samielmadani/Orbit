@@ -34,3 +34,5 @@ For an updateable release APK, configure `RELEASE_STORE_FILE`, `RELEASE_STORE_PA
 ```
 
 Keep using the same release keystore for every update. Android will reject an update signed with a different key; if the original release key is unavailable, users must uninstall the previous app before installing a newly signed build.
+
+The GitHub release workflow falls back to the debug keystore when those secrets are missing, so releases built that way are not guaranteed to update builds signed with a different key.
