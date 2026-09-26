@@ -13,7 +13,12 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -159,6 +164,7 @@ fun OrbitAppContent(
     val discoveredDevices by viewModel.discoveredDevices.collectAsState()
     val recentDevices by viewModel.recentDevices.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+    val isAdvertising by viewModel.isAdvertising.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
     val showPermissionSheet by viewModel.showPermissionSheet.collectAsState()
     val showSendTextDialog by viewModel.showSendTextDialog.collectAsState()
@@ -166,7 +172,12 @@ fun OrbitAppContent(
     // Smooth state transitions between Discovery, Transfer, and Completion
     AnimatedContent(
         targetState = activeBatch?.status,
-        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        transitionSpec = {
+            (fadeIn(tween(220)) + scaleIn(
+                initialScale = 0.96f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+            )) togetherWith (fadeOut(tween(140)) + scaleOut(targetScale = 0.985f, animationSpec = tween(140)))
+        },
         label = "OrbitScreenTransition"
     ) { status ->
         when (status) {
@@ -198,6 +209,7 @@ fun OrbitAppContent(
                     devices = discoveredDevices,
                     recentDevices = recentDevices,
                     isScanning = isScanning,
+                    isReceivingReady = isScanning && isAdvertising,
                     incomingRequest = incomingRequest,
                     onDeviceSelected = { device ->
                         viewModel.onDeviceSelected(device)

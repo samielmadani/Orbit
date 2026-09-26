@@ -175,7 +175,8 @@ fun TransferScreen(
                 isOutgoing = batch.isOutgoing,
                 localDeviceName = localDeviceName,
                 targetDeviceName = batch.targetDeviceName,
-                isPaused = isPaused || isReconnecting || isStorageError
+                isPaused = isPaused || isReconnecting || isStorageError,
+                speedBytesPerSec = batch.speedBytesPerSec
             )
 
             // Reconnection / Storage Alert Banner

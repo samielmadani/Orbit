@@ -52,7 +52,7 @@ class OrbitTransferService : Service() {
             context.startService(intent)
         }
 
-        fun postIncomingNotification(context: Context, deviceName: String) {
+        fun postIncomingNotification(context: Context, batch: TransferBatch) {
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -62,10 +62,13 @@ class OrbitTransferService : Service() {
                 openAppIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val notification = NotificationCompat.Builder(context, OrbitApplication.TRANSFER_CHANNEL_ID)
+            val itemNames = batch.items.take(4).joinToString(", ") { it.name }
+            val size = batch.formattedTransferred().substringAfter("/").trim()
+            val notification = NotificationCompat.Builder(context, OrbitApplication.DISCOVERY_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("Incoming transfer")
-                .setContentText("$deviceName wants to share with you. Tap to review.")
+                .setContentTitle("${batch.targetDeviceName} wants to send")
+                .setContentText("${batch.items.size} ${if (batch.items.size == 1) "item" else "items"} · $size. Tap to review.")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("${batch.items.size} items ($size): $itemNames. Open Orbit to accept or decline."))
                 .setContentIntent(contentIntent)
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -73,6 +76,57 @@ class OrbitTransferService : Service() {
                 .build()
             (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(INCOMING_NOTIFICATION_ID, notification)
+        }
+
+        fun updateTransferNotification(context: Context, batch: TransferBatch) {
+            val paused = batch.status == TransferStatus.PAUSED
+            val title = if (batch.isOutgoing) "Sending to ${batch.targetDeviceName}" else "Receiving from ${batch.targetDeviceName}"
+            val progressText = if (paused) {
+                "Paused · ${batch.progressPercent}%"
+            } else {
+                "${batch.progressPercent}% · ${batch.formattedSpeed()} · ETA ${batch.formattedEta()}"
+            }
+            val summary = "${batch.items.size} ${if (batch.items.size == 1) "item" else "items"} · ${batch.formattedTransferred()}"
+            val appIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val contentIntent = PendingIntent.getActivity(
+                context,
+                NOTIFICATION_ID,
+                appIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val actionIntent = Intent(context, OrbitTransferService::class.java).apply {
+                action = if (paused) ACTION_RESUME else ACTION_PAUSE
+            }
+            val actionPendingIntent = PendingIntent.getService(
+                context,
+                1,
+                actionIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val cancelIntent = Intent(context, OrbitTransferService::class.java).apply { action = ACTION_CANCEL }
+            val cancelPendingIntent = PendingIntent.getService(
+                context,
+                2,
+                cancelIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(context, OrbitApplication.TRANSFER_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(progressText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$progressText\n$summary"))
+                .setProgress(100, batch.progressPercent, false)
+                .setContentIntent(contentIntent)
+                .setOnlyAlertOnce(true)
+                .setOngoing(true)
+                .addAction(android.R.drawable.ic_media_pause, if (paused) "Resume" else "Pause", actionPendingIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, notification)
         }
 
         fun cancelIncomingNotification(context: Context) {
@@ -123,19 +177,7 @@ class OrbitTransferService : Service() {
     }
 
     fun updateProgress(batch: TransferBatch) {
-        val title = if (batch.isOutgoing) "Sending to ${batch.targetDeviceName}" else "Receiving from ${batch.targetDeviceName}"
-        val isPaused = batch.status == TransferStatus.PAUSED
-        val subtitle = if (isPaused) "Paused (${batch.progressPercent}%)" else "${batch.progressPercent}% · ${batch.formattedSpeed()} · ETA ${batch.formattedEta()}"
-
-        val notification = buildTransferNotification(
-            title = title,
-            content = subtitle,
-            progress = batch.progressPercent,
-            isPaused = isPaused
-        )
-
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager?.notify(NOTIFICATION_ID, notification)
+        updateTransferNotification(this, batch)
     }
 
     private fun startForegroundWithNotification(

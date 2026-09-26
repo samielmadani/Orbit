@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sensors
@@ -76,13 +79,17 @@ fun IncomingTransferOverlay(
 				contentAlignment = Alignment.Center
 			) {
 				Surface(
-					modifier = Modifier.fillMaxWidth(),
+					modifier = Modifier
+						.fillMaxWidth()
+						.heightIn(max = 760.dp),
 					shape = RoundedCornerShape(24.dp),
 					color = SurfaceElevated,
 					border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.25f))
 				) {
 					Column(
-						modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+						modifier = Modifier
+							.verticalScroll(rememberScrollState())
+							.padding(horizontal = 24.dp, vertical = 28.dp),
 						horizontalAlignment = Alignment.CenterHorizontally,
 						verticalArrangement = Arrangement.spacedBy(16.dp)
 					) {
@@ -99,7 +106,7 @@ fun IncomingTransferOverlay(
 							fontWeight = FontWeight.SemiBold
 						)
 						Text(
-							text = visibleRequest.targetDeviceName,
+							text = "${visibleRequest.targetDeviceName} wants to share",
 							color = TextPrimary,
 							fontSize = 25.sp,
 							fontWeight = FontWeight.Bold,
@@ -109,7 +116,7 @@ fun IncomingTransferOverlay(
 							text = if (visibleRequest.items.isEmpty()) {
 								"Wants to share files or text with you."
 							} else {
-								"${visibleRequest.items.size} item(s) · ${visibleRequest.formattedTransferred().substringAfter("/").trim()}"
+								"${visibleRequest.items.size} ${if (visibleRequest.items.size == 1) "item" else "items"} · ${visibleRequest.formattedTransferred().substringAfter("/").trim()} total"
 							},
 							color = TextSecondary,
 							fontSize = 16.sp,

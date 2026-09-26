@@ -159,6 +159,21 @@ fun CompletionScreen(
                                 join = StrokeJoin.Round
                             )
                         )
+
+                        repeat(14) { particleIndex ->
+                            val delay = particleIndex * 0.035f
+                            val convergence = ((progress - delay) / (1f - delay)).coerceIn(0f, 1f)
+                            val radius = 56f * (1f - convergence)
+                            val angle = particleIndex * (Math.PI * 2 / 14).toFloat()
+                            drawCircle(
+                                color = NeonEmerald.copy(alpha = (1f - convergence) * 0.9f),
+                                radius = 2.2f + (1f - convergence) * 1.8f,
+                                center = Offset(
+                                    cx + kotlin.math.cos(angle) * radius,
+                                    cy + kotlin.math.sin(angle) * radius
+                                )
+                            )
+                        }
                     }
                 }
 

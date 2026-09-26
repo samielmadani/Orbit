@@ -55,9 +55,9 @@ fun OrbitalRadarCanvas(
     val infiniteTransition = rememberInfiniteTransition(label = "OrbitInfinite")
     val orbitTime by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = (Math.PI * 200).toFloat(),
+        targetValue = (Math.PI * 2).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(200_000, easing = LinearEasing),
+            animation = tween(48_000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "orbitTime"
@@ -84,6 +84,17 @@ fun OrbitalRadarCanvas(
         ),
         label = "floatY"
     )
+
+    val orbitArrival = remember { Animatable(1f) }
+    LaunchedEffect(devices.map { it.endpointId }) {
+        if (devices.isNotEmpty()) {
+            orbitArrival.snapTo(0.9f)
+            orbitArrival.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 190f)
+            )
+        }
+    }
 
     // Cache computed positions for tap detection
     val devicePositions = remember { mutableMapOf<String, Offset>() }
@@ -133,35 +144,24 @@ fun OrbitalRadarCanvas(
             // 2. Animated Signal Pulse Waves (when scanning)
             if (isScanning) {
                 val maxRadius = baseRadii.last()
-                val currentPulseR = maxRadius * pulseProgress
-                val pulseRy = currentPulseR * pitch
-                val pulseAlpha = (1f - pulseProgress).coerceIn(0f, 1f) * 0.35f
-
-                drawOval(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            ElectricCyan.copy(alpha = pulseAlpha),
-                            ElectricCyan.copy(alpha = 0f)
-                        ),
-                        center = Offset(cx, cy),
-                        radius = currentPulseR
-                    ),
-                    topLeft = Offset(cx - currentPulseR, cy - pulseRy),
-                    size = Size(currentPulseR * 2f, pulseRy * 2f)
-                )
-
-                drawOval(
-                    color = ElectricCyan.copy(alpha = pulseAlpha),
-                    topLeft = Offset(cx - currentPulseR, cy - pulseRy),
-                    size = Size(currentPulseR * 2f, pulseRy * 2f),
-                    style = Stroke(width = 2f)
-                )
+                repeat(3) { ringIndex ->
+                    val ringProgress = (pulseProgress + ringIndex / 3f) % 1f
+                    val ringRadius = maxRadius * ringProgress
+                    val ringAlpha = (1f - ringProgress) * (0.26f - ringIndex * 0.035f)
+                    drawOval(
+                        color = ElectricCyan.copy(alpha = ringAlpha),
+                        topLeft = Offset(cx - ringRadius, cy - ringRadius * pitch),
+                        size = Size(ringRadius * 2f, ringRadius * pitch * 2f),
+                        style = Stroke(width = if (ringIndex == 0) 2f else 1.4f)
+                    )
+                }
             }
 
             // 3. Draw Discovered Orbiting Device Pods
             devicePositions.clear()
-            devices.forEachIndexed { idx, dev ->
-                val trackRadius = baseRadii[dev.trackIndex.coerceIn(0, baseRadii.size - 1)]
+            devices.forEach { dev ->
+                val radiusVariation = 0.94f + (dev.endpointId.hashCode().and(0xFF) / 255f) * 0.12f
+                val trackRadius = baseRadii[dev.trackIndex.coerceIn(0, baseRadii.size - 1)] * radiusVariation * orbitArrival.value
                 val trackRy = trackRadius * pitch
                 val angle = dev.initialAngle + (orbitTime * dev.orbitalSpeed)
 
@@ -188,17 +188,20 @@ fun OrbitalRadarCanvas(
             // 4. Draw Signature Stylized Isometric Device at Center
             drawCenterDeviceIsometric(
                 cx = cx,
-                cy = cy + floatY
+                cy = cy + floatY,
+                isReceivingMode = isReceivingMode
             )
 
             if (isReceivingMode) {
-                val receiveRadius = 68f + pulseProgress * 22f
-                drawCircle(
-                    color = NeonEmerald.copy(alpha = (1f - pulseProgress) * 0.7f),
-                    radius = receiveRadius,
-                    center = Offset(cx, cy + floatY),
-                    style = Stroke(width = 2f)
-                )
+                repeat(2) { ringIndex ->
+                    val ringProgress = (pulseProgress + ringIndex * 0.5f) % 1f
+                    drawCircle(
+                        color = NeonEmerald.copy(alpha = (1f - ringProgress) * 0.65f),
+                        radius = 68f + ringProgress * 28f,
+                        center = Offset(cx, cy + floatY),
+                        style = Stroke(width = 2f)
+                    )
+                }
             }
         }
     }
@@ -207,11 +210,12 @@ fun OrbitalRadarCanvas(
 /**
  * Draws the user's central phone as a stylized 3D isometric illustration with neon aura.
  */
-private fun DrawScope.drawCenterDeviceIsometric(cx: Float, cy: Float) {
+private fun DrawScope.drawCenterDeviceIsometric(cx: Float, cy: Float, isReceivingMode: Boolean) {
+    val deviceAccent = if (isReceivingMode) NeonEmerald else ElectricCyan
     // Ambient radial glow
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(ElectricCyan.copy(alpha = 0.28f), Color.Transparent),
+            colors = listOf(deviceAccent.copy(alpha = 0.34f), Color.Transparent),
             center = Offset(cx, cy),
             radius = 120f
         ),
@@ -241,7 +245,7 @@ private fun DrawScope.drawCenterDeviceIsometric(cx: Float, cy: Float) {
         cornerRadius = corner
     )
     drawRoundRect(
-        color = ElectricCyan.copy(alpha = 0.6f),
+        color = deviceAccent.copy(alpha = 0.72f),
         topLeft = Offset(cx - phoneW / 2f, cy - phoneH / 2f),
         size = Size(phoneW, phoneH),
         cornerRadius = corner,
@@ -261,12 +265,12 @@ private fun DrawScope.drawCenterDeviceIsometric(cx: Float, cy: Float) {
 
     // Screen Orbit Core Glyph
     drawCircle(
-        color = ElectricCyan.copy(alpha = 0.2f),
+        color = deviceAccent.copy(alpha = 0.24f),
         radius = 14f,
         center = Offset(cx, cy)
     )
     drawCircle(
-        color = ElectricCyan,
+        color = deviceAccent,
         radius = 5f,
         center = Offset(cx, cy)
     )

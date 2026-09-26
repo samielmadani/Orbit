@@ -34,6 +34,7 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
     val discoveredDevices: StateFlow<List<DiscoveredDevice>> = nearbyManager.discoveredDevices
     val activeBatch: StateFlow<TransferBatch?> = nearbyManager.activeBatch
     val isScanning: StateFlow<Boolean> = nearbyManager.isScanning
+    val isAdvertising: StateFlow<Boolean> = nearbyManager.isAdvertising
 
     private val _recentDevices = MutableStateFlow<List<RecentDevice>>(emptyList())
     val recentDevices: StateFlow<List<RecentDevice>> = _recentDevices.asStateFlow()
@@ -69,7 +70,7 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is NearbyEvent.IncomingTransferReady -> {
                         _incomingRequest.value = event.batch
-                        OrbitTransferService.postIncomingNotification(context, event.batch.targetDeviceName)
+                        OrbitTransferService.postIncomingNotification(context, event.batch)
                     }
                     is NearbyEvent.ConnectionAccepted -> {
                         // If we have staged items and this endpoint matches, dispatch
@@ -95,8 +96,13 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
         // Keep foreground service notification in sync with active batch
         viewModelScope.launch {
             activeBatch.collect { batch ->
-                if (batch != null && (batch.status == TransferStatus.TRANSFERRING || batch.status == TransferStatus.PAUSED)) {
-                    // Update service notification
+                if (batch != null && batch.status !in setOf(
+                        TransferStatus.COMPLETED,
+                        TransferStatus.FAILED,
+                        TransferStatus.CANCELLED,
+                        TransferStatus.STORAGE_ERROR
+                    )) {
+                    OrbitTransferService.updateTransferNotification(context, batch)
                 }
             }
         }

@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.samielmadani.orbit.ui.theme.AuroraViolet
 import com.samielmadani.orbit.ui.theme.ElectricCyan
+import com.samielmadani.orbit.ui.theme.NeonEmerald
 import com.samielmadani.orbit.ui.theme.SpaceBackground
 import com.samielmadani.orbit.ui.theme.SurfaceElevated
 import kotlin.random.Random
@@ -44,7 +45,8 @@ fun TransferStreamArc(
     isOutgoing: Boolean,
     localDeviceName: String,
     targetDeviceName: String,
-    isPaused: Boolean
+    isPaused: Boolean,
+    speedBytesPerSec: Long
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "TransferArcTransition")
     val timeTick by infiniteTransition.animateFloat(
@@ -84,8 +86,6 @@ fun TransferStreamArc(
             val nodeY = h * 0.62f
 
             val (sourceX, destX) = if (isOutgoing) Pair(leftX, rightX) else Pair(rightX, leftX)
-            val sourceName = if (isOutgoing) localDeviceName else targetDeviceName
-            val destName = if (isOutgoing) targetDeviceName else localDeviceName
 
             val controlX = w / 2f
             val controlY = nodeY - 140f
@@ -103,9 +103,11 @@ fun TransferStreamArc(
             )
 
             // 2. Draw animated particles along Bezier curve
-            particles.forEach { p ->
+            val activeParticleCount = (8 + speedBytesPerSec / 64_000L).toInt().coerceIn(8, particles.size)
+            val speedFactor = (0.7f + speedBytesPerSec / 1_000_000f).coerceIn(0.7f, 3f)
+            particles.take(activeParticleCount).forEach { p ->
                 if (!isPaused) {
-                    p.t += p.speed
+                    p.t += p.speed * speedFactor
                     if (p.t > 1f) p.t = 0f
                 }
 
@@ -116,35 +118,40 @@ fun TransferStreamArc(
                 // Quadratic Bezier formula
                 val bx = uu * sourceX + 2f * u * p.t * controlX + tt * destX
                 val by = uu * nodeY + 2f * u * p.t * controlY + tt * nodeY
+                val tailT = (p.t - p.speed * speedFactor * 2.2f).coerceAtLeast(0f)
+                val tailU = 1f - tailT
+                val tailX = tailU * tailU * sourceX + 2f * tailU * tailT * controlX + tailT * tailT * destX
+                val tailY = tailU * tailU * nodeY + 2f * tailU * tailT * controlY + tailT * tailT * nodeY
 
-                // Particle radial glow
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(p.color.copy(alpha = 0.8f), Color.Transparent),
-                        center = Offset(bx, by + p.offset),
-                        radius = p.size * 2.5f
-                    ),
-                    radius = p.size * 2.5f,
-                    center = Offset(bx, by + p.offset)
+                drawLine(
+                    color = p.color.copy(alpha = 0.45f),
+                    start = Offset(tailX, tailY + p.offset),
+                    end = Offset(bx, by + p.offset),
+                    strokeWidth = (p.size * 0.8f).coerceAtLeast(1.2f)
                 )
-
-                // Particle core
                 drawCircle(
-                    color = Color.White,
-                    radius = p.size,
+                    color = Color.White.copy(alpha = 0.75f + (timeTick * 0.25f)),
+                    radius = p.size * (0.85f + timeTick * 0.3f),
                     center = Offset(bx, by + p.offset)
                 )
             }
 
             // 3. Draw Endpoint Devices
-            drawEndpointDevice(leftX, nodeY, if (isOutgoing) localDeviceName else targetDeviceName, isOutgoing)
-            drawEndpointDevice(rightX, nodeY, if (isOutgoing) targetDeviceName else localDeviceName, !isOutgoing)
+            drawEndpointDevice(leftX, nodeY, if (isOutgoing) localDeviceName else targetDeviceName, isOutgoing, !isOutgoing, timeTick)
+            drawEndpointDevice(rightX, nodeY, if (isOutgoing) targetDeviceName else localDeviceName, !isOutgoing, isOutgoing, timeTick)
         }
     }
 }
 
-private fun DrawScope.drawEndpointDevice(cx: Float, cy: Float, name: String, isSender: Boolean) {
-    val accent = if (isSender) ElectricCyan else AuroraViolet
+private fun DrawScope.drawEndpointDevice(
+    cx: Float,
+    cy: Float,
+    name: String,
+    isSender: Boolean,
+    isReceiving: Boolean,
+    pulse: Float
+) {
+    val accent = if (isReceiving) NeonEmerald else if (isSender) ElectricCyan else AuroraViolet
 
     // Base shadow
     drawOval(
@@ -156,7 +163,7 @@ private fun DrawScope.drawEndpointDevice(cx: Float, cy: Float, name: String, isS
     // Glowing aura
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(accent.copy(alpha = 0.35f), Color.Transparent),
+            colors = listOf(accent.copy(alpha = if (isReceiving) 0.42f + pulse * 0.2f else 0.35f), Color.Transparent),
             center = Offset(cx, cy),
             radius = 55f
         ),
@@ -197,6 +204,14 @@ private fun DrawScope.drawEndpointDevice(cx: Float, cy: Float, name: String, isS
         radius = 4f,
         center = Offset(cx, cy)
     )
+    if (isReceiving) {
+        drawCircle(
+            color = accent.copy(alpha = 0.25f + pulse * 0.35f),
+            radius = 11f + pulse * 4f,
+            center = Offset(cx, cy),
+            style = Stroke(width = 1.5f)
+        )
+    }
 
     // Text Label below
     drawContext.canvas.nativeCanvas.apply {
