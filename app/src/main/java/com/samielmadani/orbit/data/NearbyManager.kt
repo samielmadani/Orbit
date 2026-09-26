@@ -47,6 +47,7 @@ sealed class NearbyEvent {
         val deviceName: String,
         val authenticationToken: String
     ) : NearbyEvent()
+    data class IncomingTransferReady(val batch: TransferBatch) : NearbyEvent()
     data class ConnectionAccepted(val endpointId: String, val deviceName: String) : NearbyEvent()
     data class ConnectionRejected(val endpointId: String) : NearbyEvent()
     data class TransferFinished(val batch: TransferBatch) : NearbyEvent()
@@ -64,6 +65,8 @@ class NearbyManager(private val context: Context) {
         private const val CTRL_PAUSE = "ORBIT_CTRL:PAUSE"
         private const val CTRL_RESUME = "ORBIT_CTRL:RESUME"
         private const val CTRL_CANCEL = "ORBIT_CTRL:CANCEL"
+        private const val CTRL_ACCEPT = "ORBIT_CTRL:ACCEPT"
+        private const val CTRL_COMPLETE = "ORBIT_CTRL:COMPLETE"
     }
 
     private val connectionsClient: ConnectionsClient = Nearby.getConnectionsClient(context)
@@ -111,6 +114,7 @@ class NearbyManager(private val context: Context) {
     // Active payload tracking: payloadId -> (file, item)
     private val incomingFilePayloads = mutableMapOf<Long, Pair<File, ManifestItem>>()
     private val outgoingPayloads = mutableMapOf<Long, TransferItem>()
+    private val outgoingItemsAwaitingApproval = mutableMapOf<String, List<TransferItem>>()
 
     // -------------------------------------------------------------
     // Lifecycle & Discovery
@@ -247,7 +251,9 @@ class NearbyManager(private val context: Context) {
         )
         _activeBatch.value = batch
 
-        // Step 1: Send Manifest Payload first
+        outgoingItemsAwaitingApproval[endpointId] = items
+
+        // Share metadata first; file payloads wait for receiver approval.
         val manifestItems = items.map {
             ManifestItem(
                 name = it.name,
@@ -269,9 +275,8 @@ class NearbyManager(private val context: Context) {
         val manifestPayload = Payload.fromBytes(manifest.toJsonString().toByteArray(Charsets.UTF_8))
         connectionsClient.sendPayload(endpointId, manifestPayload).addOnSuccessListener {
             Log.d(TAG, "Manifest payload dispatched")
-            // Step 2: Send file payloads sequentially/streamed
-            sendPayloadFiles(endpointId, items)
         }.addOnFailureListener { e ->
+            outgoingItemsAwaitingApproval.remove(endpointId)
             Log.e(TAG, "Failed sending manifest", e)
             _activeBatch.value = batch.copy(
                 status = TransferStatus.FAILED,
@@ -338,6 +343,30 @@ class NearbyManager(private val context: Context) {
         _activeBatch.value = batch.copy(status = TransferStatus.CANCELLED)
     }
 
+    fun acceptIncomingTransfer(batch: TransferBatch) {
+        connectedEndpointId = batch.targetEndpointId
+        connectedDeviceName = batch.targetDeviceName
+        _activeBatch.value = batch.copy(status = TransferStatus.TRANSFERRING)
+        connectionsClient.sendPayload(
+            batch.targetEndpointId,
+            Payload.fromBytes(CTRL_ACCEPT.toByteArray(Charsets.UTF_8))
+        ).addOnFailureListener { error ->
+            _activeBatch.value = _activeBatch.value?.copy(
+                status = TransferStatus.FAILED,
+                errorMessage = "Could not approve the incoming transfer: ${error.message}"
+            )
+        }
+    }
+
+    fun declineIncomingTransfer(batch: TransferBatch) {
+        connectionsClient.sendPayload(
+            batch.targetEndpointId,
+            Payload.fromBytes(CTRL_CANCEL.toByteArray(Charsets.UTF_8))
+        )
+        connectionsClient.disconnectFromEndpoint(batch.targetEndpointId)
+        pendingManifest = null
+    }
+
     // -------------------------------------------------------------
     // Callbacks: Discovery
     // -------------------------------------------------------------
@@ -377,17 +406,6 @@ class NearbyManager(private val context: Context) {
             connectedEndpointId = endpointId
             connectedDeviceName = info.endpointName
 
-            // For auto-acceptance in simple P2P, or trigger event for UI confirmation
-            scope.launch {
-                _events.emit(
-                    NearbyEvent.IncomingRequest(
-                        endpointId = endpointId,
-                        deviceName = info.endpointName,
-                        authenticationToken = info.authenticationDigits
-                    )
-                )
-            }
-            // Auto accept handshake to allow Nearby Connections to upgrade bandwidth
             acceptConnection(endpointId)
         }
 
@@ -458,6 +476,28 @@ class NearbyManager(private val context: Context) {
                     val message = String(bytes, Charsets.UTF_8)
 
                     when {
+                        message == CTRL_ACCEPT -> {
+                            val approvedItems = outgoingItemsAwaitingApproval.remove(endpointId)
+                            if (approvedItems != null) {
+                                sendPayloadFiles(endpointId, approvedItems)
+                                if (approvedItems.all { it.isText }) {
+                                    connectionsClient.sendPayload(
+                                        endpointId,
+                                        Payload.fromBytes(CTRL_COMPLETE.toByteArray(Charsets.UTF_8))
+                                    )
+                                    val completedBatch = _activeBatch.value?.copy(
+                                        bytesTransferred = _activeBatch.value?.totalBytes ?: 0L,
+                                        status = TransferStatus.COMPLETED,
+                                        speedBytesPerSec = 0L,
+                                        etaSeconds = 0L
+                                    )
+                                    _activeBatch.value = completedBatch
+                                    if (completedBatch != null) {
+                                        scope.launch { _events.emit(NearbyEvent.TransferFinished(completedBatch)) }
+                                    }
+                                }
+                            }
+                        }
                         message == CTRL_PAUSE -> {
                             _activeBatch.value = _activeBatch.value?.copy(status = TransferStatus.PAUSED)
                         }
@@ -465,7 +505,20 @@ class NearbyManager(private val context: Context) {
                             _activeBatch.value = _activeBatch.value?.copy(status = TransferStatus.TRANSFERRING)
                         }
                         message == CTRL_CANCEL -> {
+                            outgoingItemsAwaitingApproval.remove(endpointId)
                             _activeBatch.value = _activeBatch.value?.copy(status = TransferStatus.CANCELLED)
+                        }
+                        message == CTRL_COMPLETE -> {
+                            val completedBatch = _activeBatch.value?.copy(
+                                bytesTransferred = _activeBatch.value?.totalBytes ?: 0L,
+                                status = TransferStatus.COMPLETED,
+                                speedBytesPerSec = 0L,
+                                etaSeconds = 0L
+                            )
+                            _activeBatch.value = completedBatch
+                            if (completedBatch != null) {
+                                scope.launch { _events.emit(NearbyEvent.TransferFinished(completedBatch)) }
+                            }
                         }
                         message.startsWith("{") && message.contains("batchId") -> {
                             // Incoming Manifest Payload!
@@ -606,16 +659,16 @@ class NearbyManager(private val context: Context) {
                 )
             }
 
-            val batch = TransferBatch(
+                    val batch = TransferBatch(
                 batchId = manifest.batchId,
                 targetDeviceName = manifest.senderDeviceName,
                 targetEndpointId = endpointId,
                 isOutgoing = false,
                 items = incomingItems,
                 totalBytes = manifest.totalBytes,
-                status = TransferStatus.TRANSFERRING
+                        status = TransferStatus.WAITING_CONFIRMATION
             )
-            _activeBatch.value = batch
+                    scope.launch { _events.emit(NearbyEvent.IncomingTransferReady(batch)) }
             recentDevicesStore.recordDevice(manifest.senderDeviceName, endpointId)
 
         } catch (e: Exception) {

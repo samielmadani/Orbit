@@ -22,6 +22,7 @@ class OrbitTransferService : Service() {
 
     companion object {
         const val NOTIFICATION_ID = 4040
+        const val INCOMING_NOTIFICATION_ID = 4041
         const val ACTION_START = "ACTION_START_TRANSFER"
         const val ACTION_UPDATE_PROGRESS = "ACTION_UPDATE_PROGRESS"
         const val ACTION_PAUSE = "ACTION_PAUSE_TRANSFER"
@@ -49,6 +50,34 @@ class OrbitTransferService : Service() {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+
+        fun postIncomingNotification(context: Context, deviceName: String) {
+            val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val contentIntent = PendingIntent.getActivity(
+                context,
+                INCOMING_NOTIFICATION_ID,
+                openAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(context, OrbitApplication.TRANSFER_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("Incoming transfer")
+                .setContentText("$deviceName wants to share with you. Tap to review.")
+                .setContentIntent(contentIntent)
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(INCOMING_NOTIFICATION_ID, notification)
+        }
+
+        fun cancelIncomingNotification(context: Context) {
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .cancel(INCOMING_NOTIFICATION_ID)
         }
     }
 

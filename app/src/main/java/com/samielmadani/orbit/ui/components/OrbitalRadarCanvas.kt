@@ -48,6 +48,7 @@ fun OrbitalRadarCanvas(
     modifier: Modifier = Modifier,
     devices: List<DiscoveredDevice>,
     isScanning: Boolean,
+    isReceivingMode: Boolean,
     onDeviceSelected: (DiscoveredDevice) -> Unit
 ) {
     // Continuous rotation clock for harmonic drift
@@ -189,6 +190,16 @@ fun OrbitalRadarCanvas(
                 cx = cx,
                 cy = cy + floatY
             )
+
+            if (isReceivingMode) {
+                val receiveRadius = 68f + pulseProgress * 22f
+                drawCircle(
+                    color = NeonEmerald.copy(alpha = (1f - pulseProgress) * 0.7f),
+                    radius = receiveRadius,
+                    center = Offset(cx, cy + floatY),
+                    style = Stroke(width = 2f)
+                )
+            }
         }
     }
 }

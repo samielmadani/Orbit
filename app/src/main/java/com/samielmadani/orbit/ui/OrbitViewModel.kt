@@ -65,7 +65,11 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
             nearbyManager.events.collect { event ->
                 when (event) {
                     is NearbyEvent.IncomingRequest -> {
-                        // Handled in manager, or show dialog
+                        Unit
+                    }
+                    is NearbyEvent.IncomingTransferReady -> {
+                        _incomingRequest.value = event.batch
+                        OrbitTransferService.postIncomingNotification(context, event.batch.targetDeviceName)
                     }
                     is NearbyEvent.ConnectionAccepted -> {
                         // If we have staged items and this endpoint matches, dispatch
@@ -250,16 +254,18 @@ class OrbitViewModel(application: Application) : AndroidViewModel(application) {
 
     fun acceptIncoming() {
         _incomingRequest.value?.let { batch ->
-            nearbyManager.acceptConnection(batch.targetEndpointId)
+            nearbyManager.acceptIncomingTransfer(batch)
             _incomingRequest.value = null
+            OrbitTransferService.cancelIncomingNotification(context)
             OrbitTransferService.startService(context)
         }
     }
 
     fun rejectIncoming() {
         _incomingRequest.value?.let { batch ->
-            nearbyManager.rejectConnection(batch.targetEndpointId)
+            nearbyManager.declineIncomingTransfer(batch)
             _incomingRequest.value = null
+            OrbitTransferService.cancelIncomingNotification(context)
         }
     }
 

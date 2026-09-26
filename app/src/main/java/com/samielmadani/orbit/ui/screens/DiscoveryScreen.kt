@@ -29,15 +29,9 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,7 +52,6 @@ import com.samielmadani.orbit.ui.components.OrbitPillButton
 import com.samielmadani.orbit.ui.components.OrbitalRadarCanvas
 import com.samielmadani.orbit.ui.theme.AuroraViolet
 import com.samielmadani.orbit.ui.theme.ElectricCyan
-import com.samielmadani.orbit.ui.theme.ErrorRed
 import com.samielmadani.orbit.ui.theme.NeonEmerald
 import com.samielmadani.orbit.ui.theme.SolarAmber
 import com.samielmadani.orbit.ui.theme.SpaceBackground
@@ -148,8 +141,8 @@ fun DiscoveryScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = if (isScanning) "Active" else "Idle",
-                            color = if (isScanning) ElectricCyan else TextMuted,
+                            text = if (isScanning) "Ready to receive" else "Idle",
+                            color = if (isScanning) NeonEmerald else TextMuted,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -168,6 +161,7 @@ fun DiscoveryScreen(
                     modifier = Modifier.fillMaxSize(),
                     devices = devices,
                     isScanning = isScanning,
+                    isReceivingMode = isScanning,
                     onDeviceSelected = onDeviceSelected
                 )
 
@@ -287,72 +281,11 @@ fun DiscoveryScreen(
             }
         }
 
-        // Incoming Transfer Request Dialog
-        if (incomingRequest != null) {
-            AlertDialog(
-                onDismissRequest = onRejectIncoming,
-                containerColor = SurfaceElevated,
-                titleContentColor = TextPrimary,
-                textContentColor = TextSecondary,
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Sensors,
-                            contentDescription = null,
-                            tint = ElectricCyan
-                        )
-                        Text(
-                            text = "Incoming from ${incomingRequest.targetDeviceName}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "${incomingRequest.items.size} file(s) · ${incomingRequest.formattedTransferred().split("/").last().trim()}",
-                            color = TextPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp
-                        )
-                        incomingRequest.items.take(3).forEach { item ->
-                            Text(
-                                text = "• ${item.name} (${item.formattedSize()})",
-                                color = TextSecondary,
-                                fontSize = 13.sp
-                            )
-                        }
-                        if (incomingRequest.items.size > 3) {
-                            Text(
-                                text = "+ ${incomingRequest.items.size - 3} more files",
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = onAcceptIncoming,
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
-                    ) {
-                        Text("Accept & Receive", color = SpaceBackground, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(
-                        onClick = onRejectIncoming,
-                        border = BorderStroke(1.dp, SurfaceBorder)
-                    ) {
-                        Text("Decline", color = TextSecondary)
-                    }
-                }
-            )
-        }
+        IncomingTransferOverlay(
+            request = incomingRequest,
+            onAccept = onAcceptIncoming,
+            onDecline = onRejectIncoming
+        )
     }
 }
 
