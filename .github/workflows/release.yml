@@ -1,0 +1,126 @@
+name: Android release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: platform-tools platforms;android-35 build-tools;35.0.0
+
+      - name: Select release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_version="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          base_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -n 1)"
+          if [[ -z "$base_version" || -z "$base_code" ]]; then
+            echo 'Unable to read the Android base version from app/build.gradle.kts.' >&2
+            exit 1
+          fi
+
+          tags="$(gh api "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --jq '.[].name' || true)"
+          version_name="$base_version"
+          highest_tag="$(printf '%s\n' "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          if [[ -n "$highest_tag" ]]; then
+            highest_version="${highest_tag#v}"
+            if [[ "$(printf '%s\n%s\n' "$version_name" "$highest_version" | sort -V | tail -n 1)" == "$highest_version" ]]; then
+              IFS=. read -r major minor patch <<< "$highest_version"
+              version_name="${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+
+          while grep -qx "v${version_name}" <<< "$tags"; do
+            IFS=. read -r major minor patch <<< "$version_name"
+            version_name="${major}.${minor}.$((patch + 1))"
+          done
+
+          IFS=. read -r base_major base_minor base_patch <<< "$base_version"
+          IFS=. read -r release_major release_minor release_patch <<< "$version_name"
+          version_code=$((base_code + release_patch - base_patch))
+          if (( version_code < base_code )); then
+            version_code="$base_code"
+          fi
+
+          {
+            echo "version_name=$version_name"
+            echo "version_code=$version_code"
+            echo "tag=v${version_name}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build installable APK
+        env:
+          RELEASE_STORE_BASE64: ${{ secrets.RELEASE_STORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          test -n "$RELEASE_STORE_BASE64" || { echo 'Missing RELEASE_STORE_BASE64'; exit 1; }
+          test -n "$RELEASE_STORE_PASSWORD" || { echo 'Missing RELEASE_STORE_PASSWORD'; exit 1; }
+          test -n "$RELEASE_KEY_ALIAS" || { echo 'Missing RELEASE_KEY_ALIAS'; exit 1; }
+          test -n "$RELEASE_KEY_PASSWORD" || { echo 'Missing RELEASE_KEY_PASSWORD'; exit 1; }
+          export RELEASE_STORE_FILE="$RUNNER_TEMP/orbit-release.jks"
+          printf '%s' "$RELEASE_STORE_BASE64" | base64 --decode > "$RELEASE_STORE_FILE"
+          ./gradlew :app:assembleRelease \
+            -PversionName="${{ steps.version.outputs.version_name }}" \
+            -PversionCode="${{ steps.version.outputs.version_code }}"
+
+      - name: Prepare APK
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk_path="app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -f "$apk_path" ]]; then
+            echo 'No installable APK was produced.' >&2
+            exit 1
+          fi
+          output_path="app/build/outputs/apk/release/orbit-${{ steps.version.outputs.version_name }}.apk"
+          cp "$apk_path" "$output_path"
+          echo "path=$output_path" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" "$APK_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "Orbit ${VERSION_NAME}" \
+            --notes "Orbit ${VERSION_NAME}\n\nCommit SHA: ${GITHUB_SHA}" \
+            --generate-notes

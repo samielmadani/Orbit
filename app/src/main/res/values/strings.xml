@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Orbit</string>
+    <string name="channel_name">Orbit File Transfers</string>
+    <string name="channel_desc">Active transfers and nearby device discovery</string>
+</resources>
